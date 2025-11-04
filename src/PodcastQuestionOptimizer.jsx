@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Sparkles, Loader2, CheckCircle2, AlertCircle, X } from 'lucide-react';
 
 export default function PodcastQuestionOptimizer() {
   const [audience, setAudience] = useState('');
@@ -9,8 +9,12 @@ export default function PodcastQuestionOptimizer() {
   const [feedback, setFeedback] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [submittingEmail, setSubmittingEmail] = useState(false);
 
-  const analyzQuestions = async () => {
+  const handleSubmitClick = () => {
     if (!audience.trim() || !guestBio.trim()) {
       setError('Please fill in audience and guest bio fields.');
       return;
@@ -21,6 +25,75 @@ export default function PodcastQuestionOptimizer() {
       return;
     }
 
+    // Show email modal first
+    setShowEmailModal(true);
+    setError(null);
+  };
+
+  const submitEmailAndContinue = async () => {
+    if (!email.trim()) {
+      setError('Please enter your email address.');
+      return;
+    }
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+
+    setSubmittingEmail(true);
+    setError(null);
+
+    try {
+      // Submit email to Google Sheets and Mailchimp
+      const response = await fetch('https://podcast-question-proxy.hugo-3ec.workers.dev/submit-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: email.trim(),
+          name: name.trim() || 'Anonymous',
+          timestamp: new Date().toISOString(),
+          audience: audience.trim(),
+          guestBio: guestBio.trim(),
+          questions: questions.trim(),
+          generateMode: generateMode
+        })
+      });
+
+      // Log response for debugging
+      console.log('Email submission response status:', response.status);
+      const responseData = await response.json().catch(() => ({}));
+      console.log('Email submission response:', responseData);
+      console.log('Google Sheets result:', responseData.sheets);
+      console.log('Mailchimp result:', responseData.mailchimp);
+
+      if (!response.ok) {
+        throw new Error(responseData.error || `Failed to submit email: ${response.status}`);
+      }
+
+      // Log success
+      console.log('Email submitted successfully:', responseData);
+
+      // Close modal and proceed with analysis
+      setShowEmailModal(false);
+      await analyzQuestions();
+    } catch (err) {
+      console.error('Error submitting email:', err);
+      // Show error but still allow them to continue (don't block the flow)
+      setError(err.message || 'Failed to submit email. Please try again.');
+      // Still close modal and proceed - don't block the user experience
+      setShowEmailModal(false);
+      setSubmittingEmail(false);
+      // Continue with analysis even if email submission failed
+      await analyzQuestions();
+    }
+  };
+
+  const analyzQuestions = async () => {
     setLoading(true);
     setError(null);
     setFeedback(null);
@@ -140,6 +213,9 @@ IMPORTANT: Respond ONLY with valid JSON. Do not include any text outside the JSO
   const resetForm = () => {
     setFeedback(null);
     setError(null);
+    setEmail('');
+    setName('');
+    setShowEmailModal(false);
   };
 
   return (
@@ -336,30 +412,30 @@ IMPORTANT: Respond ONLY with valid JSON. Do not include any text outside the JSO
               )}
 
               <button
-                onClick={analyzQuestions}
-                disabled={loading}
+                onClick={handleSubmitClick}
+                disabled={loading || submittingEmail}
                 style={{
                   width: '100%',
                   padding: '16px',
-                  background: loading ? 'rgba(255,255,255,0.1)' : 'linear-gradient(90deg,rgba(254, 206, 0, 1) 0%, rgba(244, 76, 10, 1) 50%, rgba(242, 61, 190, 1) 100%)',
+                  background: (loading || submittingEmail) ? 'rgba(255,255,255,0.1)' : 'linear-gradient(90deg,rgba(254, 206, 0, 1) 0%, rgba(244, 76, 10, 1) 50%, rgba(242, 61, 190, 1) 100%)',
                   border: 'none',
                   borderRadius: '8px',
-                  color: loading ? 'rgba(255,255,255,0.5)' : '#0B0113',
+                  color: (loading || submittingEmail) ? 'rgba(255,255,255,0.5)' : '#0B0113',
                   fontSize: '16px',
                   fontWeight: '700',
-                  cursor: loading ? 'not-allowed' : 'pointer',
+                  cursor: (loading || submittingEmail) ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '12px',
                   transition: 'transform 0.2s',
-                  transform: loading ? 'none' : 'scale(1)',
+                  transform: (loading || submittingEmail) ? 'none' : 'scale(1)',
                 }}
                 onMouseEnter={(e) => {
-                  if (!loading) e.currentTarget.style.transform = 'scale(1.02)';
+                  if (!loading && !submittingEmail) e.currentTarget.style.transform = 'scale(1.02)';
                 }}
                 onMouseLeave={(e) => {
-                  if (!loading) e.currentTarget.style.transform = 'scale(1)';
+                  if (!loading && !submittingEmail) e.currentTarget.style.transform = 'scale(1)';
                 }}
               >
                 {loading ? (
@@ -787,6 +863,192 @@ IMPORTANT: Respond ONLY with valid JSON. Do not include any text outside the JSO
           </div>
         )}
       </div>
+
+      {/* Email Modal */}
+      {showEmailModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '20px'
+        }} onClick={() => !submittingEmail && setShowEmailModal(false)}>
+          <div style={{
+            background: 'rgba(11, 1, 19, 0.98)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: '16px',
+            padding: '32px',
+            maxWidth: '500px',
+            width: '100%',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)'
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '24px'
+            }}>
+              <h2 style={{
+                margin: 0,
+                fontSize: '24px',
+                fontWeight: '700',
+                background: 'linear-gradient(90deg,rgba(254, 206, 0, 1) 0%, rgba(244, 76, 10, 1) 50%, rgba(242, 61, 190, 1) 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent'
+              }}>
+                Where would you like us to send the answers to?
+              </h2>
+              <button
+                onClick={() => !submittingEmail && setShowEmailModal(false)}
+                disabled={submittingEmail}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'rgba(255,255,255,0.6)',
+                  cursor: submittingEmail ? 'not-allowed' : 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            {error && (
+              <div style={{
+                padding: '12px',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '8px',
+                marginBottom: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px'
+              }}>
+                <AlertCircle size={18} color="#ef4444" />
+                <span style={{ color: '#fca5a5', fontSize: '14px' }}>{error}</span>
+              </div>
+            )}
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                fontSize: '14px',
+                fontWeight: '600',
+                color: '#FECE00'
+              }}>
+                Email Address <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="your@email.com"
+                disabled={submittingEmail}
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  background: '#0B0113',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: '8px',
+                  color: 'white',
+                  fontSize: '15px',
+                  fontFamily: 'inherit',
+                  boxSizing: 'border-box'
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !submittingEmail && email.trim()) {
+                    submitEmailAndContinue();
+                  }
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                fontSize: '14px',
+                fontWeight: '600',
+                color: 'rgba(255,255,255,0.9)'
+              }}>
+                Name (Optional)
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your name"
+                disabled={submittingEmail}
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  background: '#0B0113',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  borderRadius: '8px',
+                  color: 'white',
+                  fontSize: '15px',
+                  fontFamily: 'inherit',
+                  boxSizing: 'border-box'
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !submittingEmail && email.trim()) {
+                    submitEmailAndContinue();
+                  }
+                }}
+              />
+            </div>
+
+            <button
+              onClick={submitEmailAndContinue}
+              disabled={submittingEmail || !email.trim()}
+              style={{
+                width: '100%',
+                padding: '16px',
+                background: (submittingEmail || !email.trim()) ? 'rgba(255,255,255,0.1)' : 'linear-gradient(90deg,rgba(254, 206, 0, 1) 0%, rgba(244, 76, 10, 1) 50%, rgba(242, 61, 190, 1) 100%)',
+                border: 'none',
+                borderRadius: '8px',
+                color: (submittingEmail || !email.trim()) ? 'rgba(255,255,255,0.5)' : '#0B0113',
+                fontSize: '16px',
+                fontWeight: '700',
+                cursor: (submittingEmail || !email.trim()) ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '12px',
+                transition: 'transform 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                if (!submittingEmail && email.trim()) e.currentTarget.style.transform = 'scale(1.02)';
+              }}
+              onMouseLeave={(e) => {
+                if (!submittingEmail) e.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              {submittingEmail ? (
+                <>
+                  <Loader2 size={20} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
+                  Submitting...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 size={20} />
+                  Continue
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes spin {
